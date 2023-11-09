@@ -138,67 +138,119 @@ anova(fit_null, fit_alternative) |>
 need to add the predicotr that you want to be test on in the alternative 
 
 ## Borough-level difference
+We’ll now turn our attention to fitting models to datasets nested within variables – meaning, essentially, that we’ll use nest() to create a list column containing datasets and fit separate models to each. This is very different from fitting nested models, even though the terminology is similar.
+
+In the airbnb data, we might think that star ratings and room type affects price differently in each borough. One way to allow this kind of effect modification is through interaction terms:
 
 ```{r}
+fit =
+  nyc_airbnb |> 
+  lm(price ~ stars * borough + room_type * borough, data = _)
+
+fit |> 
+  broom::tidy()
+```
+
+This works, but the output takes time to think through – the expected change in price comparing an entire apartment to a private room in Queens, for example, involves the main effect of room type and the Queens / private room interaction.
+
+Alternatively, we can nest within boroughs and fit borough-specific models associating price with rating and room type:
+
+```{r}
+airbnb_lm = function(df) {
+  lm(price ~ stars + room_type, data = df)
+}
+
+
+nyc_airbnb |> 
+  nest(df = -borough) |> 
+  mutate(
+    models = map(df, airbnb_lm),
+    results = map(models, broom::tidy)
+  ) |> 
+  select(borough, results) |> 
+  unnest(results) |> 
+  select( borough, term, estimate) |> 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate
+  ) |> 
+  knitr::kable (digits = 2)
 
 ```
 
+Same thing but a little different
+
+```{r}
+nyc_airbnb |> 
+  nest(df = -borough) |> 
+  mutate(
+    models = map(df, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)
+  ) |> 
+  select(borough, results) |> 
+  unnest(results) |> 
+  select( borough, term, estimate) |> 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate
+  ) |> 
+  knitr::kable (digits = 2)
+
+```
+
+(df) lm(price ~ stars + borough, data = df): annomyous function to replace [airbnb_lm = function(df) {lm(price ~ stars + room_type, data = df)}] 
+
+## Nesting Data in more extreme cases
+
+The estimates here are the same as those in the model containing interactions, but are easier to extract from the output.
+
+Fitting models to nested datasets is a way of performing stratified analyses. These have a tradeoff: stratified models make it easy to interpret covariate effects in each stratum, but don’t provide a mechanism for assessing the significance of differences across strata.
+
+An even more extreme example is the assessment of neighborhood effects in Manhattan. The code chunk below fits neighborhood-specific models:
+
+```{r}
+manhattan_airbnb =
+  nyc_airbnb |> 
+  filter(borough == "Manhattan")
+
+manhattan_nest_lm_res =
+  manhattan_airbnb |> 
+  nest(data = -neighborhood) |> 
+  mutate(
+    models = map(data, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)) |> 
+  select(-data, -models) |> 
+  unnest(results) 
+```
+
+And the chunk below shows neighborhood-specific estimates for the coefficients related to room type.
+
+```{r}
+manhattan_nest_lm_res |> 
+  filter(str_detect(term, "room_type")) |> 
+  ggplot(aes(x = neighborhood, y = estimate)) + 
+  geom_point() + 
+  facet_wrap(~term) + 
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
 
 
+### Binary Outcome
 
+Linear models are appropriate for outcomes that follow a continuous distribution, but binary outcomes are common. In these cases, logistic regression is a useful analytic framework.
 
+The Washington Post has gathered data on homicides in 50 large U.S. cities and made the data available through a GitHub repository; the final CSV is here. You can read their accompanying article here. We’ll use data on unresolved murders in Baltimore, MD to illustrate logistic regression in R. The code below imports, cleans, and generally wrangles the data for analysis.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+```{r}
+baltimore_df = 
+  read_csv("data/homicide-data.csv") |> 
+  filter(city == "Baltimore") |> 
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_age = as.numeric(victim_age),
+    victim_race = fct_relevel(victim_race, "White")) |> 
+  select(resolved, victim_age, victim_race, victim_sex)
+```
 
 
 
