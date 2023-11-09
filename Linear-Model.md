@@ -206,3 +206,247 @@ anova(fit_null, fit_alternative) |>
 need to add the predicotr that you want to be test on in the alternative
 
 ## Borough-level difference
+
+We’ll now turn our attention to fitting models to datasets nested within
+variables – meaning, essentially, that we’ll use nest() to create a list
+column containing datasets and fit separate models to each. This is very
+different from fitting nested models, even though the terminology is
+similar.
+
+In the airbnb data, we might think that star ratings and room type
+affects price differently in each borough. One way to allow this kind of
+effect modification is through interaction terms:
+
+``` r
+fit =
+  nyc_airbnb |> 
+  lm(price ~ stars * borough + room_type * borough, data = _)
+
+fit |> 
+  broom::tidy()
+```
+
+    ## # A tibble: 16 × 5
+    ##    term                                   estimate std.error statistic   p.value
+    ##    <chr>                                     <dbl>     <dbl>     <dbl>     <dbl>
+    ##  1 (Intercept)                               90.1       75.4    1.19   0.232    
+    ##  2 stars                                      4.45      16.6    0.267  0.789    
+    ##  3 boroughBrooklyn                          -20.4       77.1   -0.265  0.791    
+    ##  4 boroughManhattan                           5.63      77.8    0.0723 0.942    
+    ##  5 boroughQueens                              1.51      83.5    0.0181 0.986    
+    ##  6 room_typePrivate room                    -52.9       17.8   -2.98   0.00288  
+    ##  7 room_typeShared room                     -70.5       41.6   -1.70   0.0896   
+    ##  8 stars:boroughBrooklyn                     16.5       17.0    0.973  0.331    
+    ##  9 stars:boroughManhattan                    22.7       17.1    1.33   0.185    
+    ## 10 stars:boroughQueens                        5.21      18.3    0.285  0.776    
+    ## 11 boroughBrooklyn:room_typePrivate room    -39.3       18.0   -2.18   0.0292   
+    ## 12 boroughManhattan:room_typePrivate room   -71.3       18.0   -3.96   0.0000754
+    ## 13 boroughQueens:room_typePrivate room      -16.3       19.0   -0.859  0.390    
+    ## 14 boroughBrooklyn:room_typeShared room     -35.3       42.9   -0.822  0.411    
+    ## 15 boroughManhattan:room_typeShared room    -83.1       42.5   -1.96   0.0503   
+    ## 16 boroughQueens:room_typeShared room       -24.4       44.4   -0.550  0.582
+
+This works, but the output takes time to think through – the expected
+change in price comparing an entire apartment to a private room in
+Queens, for example, involves the main effect of room type and the
+Queens / private room interaction.
+
+Alternatively, we can nest within boroughs and fit borough-specific
+models associating price with rating and room type:
+
+``` r
+airbnb_lm = function(df) {
+  lm(price ~ stars + room_type, data = df)
+}
+
+
+nyc_airbnb |> 
+  nest(df = -borough) |> 
+  mutate(
+    models = map(df, airbnb_lm),
+    results = map(models, broom::tidy)
+  ) |> 
+  select(borough, results) |> 
+  unnest(results) |> 
+  select( borough, term, estimate) |> 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate
+  ) |> 
+  knitr::kable (digits = 2)
+```
+
+| borough   | (Intercept) | stars | room_typePrivate room | room_typeShared room |
+|:----------|------------:|------:|----------------------:|---------------------:|
+| Bronx     |       90.07 |  4.45 |                -52.91 |               -70.55 |
+| Queens    |       91.58 |  9.65 |                -69.26 |               -94.97 |
+| Brooklyn  |       69.63 | 20.97 |                -92.22 |              -105.84 |
+| Manhattan |       95.69 | 27.11 |               -124.19 |              -153.64 |
+
+Same thing but a little different
+
+``` r
+nyc_airbnb |> 
+  nest(df = -borough) |> 
+  mutate(
+    models = map(df, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)
+  ) |> 
+  select(borough, results) |> 
+  unnest(results) |> 
+  select( borough, term, estimate) |> 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate
+  ) |> 
+  knitr::kable (digits = 2)
+```
+
+| borough   | (Intercept) | stars | room_typePrivate room | room_typeShared room |
+|:----------|------------:|------:|----------------------:|---------------------:|
+| Bronx     |       90.07 |  4.45 |                -52.91 |               -70.55 |
+| Queens    |       91.58 |  9.65 |                -69.26 |               -94.97 |
+| Brooklyn  |       69.63 | 20.97 |                -92.22 |              -105.84 |
+| Manhattan |       95.69 | 27.11 |               -124.19 |              -153.64 |
+
+(df) lm(price ~ stars + borough, data = df): annomyous function to
+replace \[airbnb_lm = function(df) {lm(price ~ stars + room_type, data =
+df)}\]
+
+## Nesting Data in more extreme cases
+
+The estimates here are the same as those in the model containing
+interactions, but are easier to extract from the output.
+
+Fitting models to nested datasets is a way of performing stratified
+analyses. These have a tradeoff: stratified models make it easy to
+interpret covariate effects in each stratum, but don’t provide a
+mechanism for assessing the significance of differences across strata.
+
+An even more extreme example is the assessment of neighborhood effects
+in Manhattan. The code chunk below fits neighborhood-specific models:
+
+``` r
+manhattan_airbnb =
+  nyc_airbnb |> 
+  filter(borough == "Manhattan")
+
+manhattan_nest_lm_res =
+  manhattan_airbnb |> 
+  nest(data = -neighborhood) |> 
+  mutate(
+    models = map(data, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)) |> 
+  select(-data, -models) |> 
+  unnest(results) 
+```
+
+And the chunk below shows neighborhood-specific estimates for the
+coefficients related to room type.
+
+``` r
+manhattan_nest_lm_res |> 
+  filter(str_detect(term, "room_type")) |> 
+  ggplot(aes(x = neighborhood, y = estimate)) + 
+  geom_point() + 
+  facet_wrap(~term) + 
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+<img src="Linear-Model_files/figure-gfm/unnamed-chunk-15-1.png" width="90%" />
+
+### Binary Outcome
+
+## Homicides in Baltimore
+
+Linear models are appropriate for outcomes that follow a continuous
+distribution, but binary outcomes are common. In these cases, logistic
+regression is a useful analytic framework.
+
+The Washington Post has gathered data on homicides in 50 large U.S.
+cities and made the data available through a GitHub repository; the
+final CSV is here. You can read their accompanying article here. We’ll
+use data on unresolved murders in Baltimore, MD to illustrate logistic
+regression in R. The code below imports, cleans, and generally wrangles
+the data for analysis.
+
+``` r
+baltimore_df = 
+  read_csv("data/homicide-data.csv") |> 
+  filter(city == "Baltimore") |> 
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_age = as.numeric(victim_age)) |> 
+  select(resolved, victim_age, victim_race, victim_sex)
+```
+
+    ## Rows: 52179 Columns: 12
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## chr (9): uid, victim_last, victim_first, victim_race, victim_age, victim_sex...
+    ## dbl (3): reported_date, lat, lon
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+as.numeric: covert to true and false to 0 and 1 (numeric)
+
+fitting a logitist regression
+
+Using these data, we can fit a logistic regression for the binary
+“resolved” outcome and victim demographics as predictors. This uses the
+glm function with the family specified to account for the non-Gaussian
+outcome distribution.
+
+``` r
+fit_logistic = 
+  baltimore_df |> 
+  glm(resolved ~ victim_age + victim_race + victim_sex, data = _, family = binomial()) 
+```
+
+look at model results
+
+Many of the same tools we used to work with lm fits can be used for glm
+fits. The table below summaries the coefficients from the model fit;
+because logistic model estimates are log odds ratios, we include a step
+to compute odds ratios as well.
+
+``` r
+fit_logistic |> 
+  broom::tidy() |> 
+  mutate(OR = exp(estimate)) |>
+  select(term, estimate, OR, p.value) |> 
+  knitr::kable(digits = 3)
+```
+
+| term                | estimate |    OR | p.value |
+|:--------------------|---------:|------:|--------:|
+| (Intercept)         |    1.486 | 4.421 |   0.024 |
+| victim_age          |   -0.007 | 0.993 |   0.027 |
+| victim_raceBlack    |   -1.138 | 0.320 |   0.076 |
+| victim_raceHispanic |   -0.562 | 0.570 |   0.418 |
+| victim_raceOther    |   -1.064 | 0.345 |   0.323 |
+| victim_raceWhite    |   -0.296 | 0.744 |   0.653 |
+| victim_sexMale      |   -0.880 | 0.415 |   0.000 |
+
+Homicides in which the victim is Black are substantially less likely to
+be resolved that those in which the victim is white; for other races the
+effects are not significant, possible due to small sample sizes.
+Homicides in which the victim is male are significantly less like to be
+resolved than those in which the victim is female. The effect of age is
+statistically significant, but careful data inspections should be
+conducted before interpreting too deeply.
+
+``` r
+baltimore_df |> 
+  count(victim_race)
+```
+
+    ## # A tibble: 5 × 2
+    ##   victim_race     n
+    ##   <chr>       <int>
+    ## 1 Asian          11
+    ## 2 Black        2596
+    ## 3 Hispanic       57
+    ## 4 Other           6
+    ## 5 White         157

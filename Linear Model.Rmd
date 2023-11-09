@@ -237,6 +237,8 @@ manhattan_nest_lm_res |>
 
 ### Binary Outcome
 
+## Homicides in Baltimore
+
 Linear models are appropriate for outcomes that follow a continuous distribution, but binary outcomes are common. In these cases, logistic regression is a useful analytic framework.
 
 The Washington Post has gathered data on homicides in 50 large U.S. cities and made the data available through a GitHub repository; the final CSV is here. You can read their accompanying article here. We’ll use data on unresolved murders in Baltimore, MD to illustrate logistic regression in R. The code below imports, cleans, and generally wrangles the data for analysis.
@@ -247,11 +249,38 @@ baltimore_df =
   filter(city == "Baltimore") |> 
   mutate(
     resolved = as.numeric(disposition == "Closed by arrest"),
-    victim_age = as.numeric(victim_age),
-    victim_race = fct_relevel(victim_race, "White")) |> 
+    victim_age = as.numeric(victim_age)) |> 
   select(resolved, victim_age, victim_race, victim_sex)
 ```
+as.numeric: covert to true and false to 0 and 1 (numeric)
 
+fitting a logitist regression
 
+Using these data, we can fit a logistic regression for the binary “resolved” outcome and victim demographics as predictors. This uses the glm function with the family specified to account for the non-Gaussian outcome distribution.
+
+```{r}
+fit_logistic = 
+  baltimore_df |> 
+  glm(resolved ~ victim_age + victim_race + victim_sex, data = _, family = binomial()) 
+```
+
+look at model results
+
+Many of the same tools we used to work with lm fits can be used for glm fits. The table below summaries the coefficients from the model fit; because logistic model estimates are log odds ratios, we include a step to compute odds ratios as well.
+
+```{r}
+fit_logistic |> 
+  broom::tidy() |> 
+  mutate(OR = exp(estimate)) |>
+  select(term, estimate, OR, p.value) |> 
+  knitr::kable(digits = 3)
+```
+
+Homicides in which the victim is Black are substantially less likely to be resolved that those in which the victim is white; for other races the effects are not significant, possible due to small sample sizes. Homicides in which the victim is male are significantly less like to be resolved than those in which the victim is female. The effect of age is statistically significant, but careful data inspections should be conducted before interpreting too deeply.
+
+```{r}
+baltimore_df |> 
+  count(victim_race)
+```
 
 
